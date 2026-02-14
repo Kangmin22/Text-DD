@@ -1,26 +1,21 @@
-파이썬 컴파일 파일 및 캐시
+[ Python Cache ]
 
+모든 하위 디렉토리의 __pycache__를 무조건 제외
+
+**/pycache/
 pycache/
 *.py[cod]
 *$py.class
 
-가상 환경
+[ Static Files ]
 
-venv/
-env/
-.env
+*.zip
+src.zip
 
-프로젝트 설정 및 에디터 관련
+[ Data & Saves ]
 
-.vscode/
-.idea/
+데이터는 보존하되 자동 생성되는 저장 파일은 제외
 
-게임 저장 데이터
-
-saves/
+src/saves/
 .json
 !src/data/.json
-
-기타 시스템 파일
-
-.DS_Store
