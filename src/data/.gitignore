@@ -1,0 +1,26 @@
+파이썬 컴파일 파일 및 캐시
+
+pycache/
+*.py[cod]
+*$py.class
+
+가상 환경
+
+venv/
+env/
+.env
+
+프로젝트 설정 및 에디터 관련
+
+.vscode/
+.idea/
+
+게임 저장 데이터
+
+saves/
+.json
+!src/data/.json
+
+기타 시스템 파일
+
+.DS_Store

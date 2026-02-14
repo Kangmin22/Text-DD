@@ -1,0 +1,22 @@
+{
+  "human": {
+    "name": "Human",
+    "description": "Versatile and ambitious.",
+    "base_bonus": {"strength": 1, "dexterity": 1, "constitution": 1, "intelligence": 1, "wisdom": 1, "charisma": 1}
+  },
+  "orc": {
+    "name": "Orc",
+    "description": "Born for war. High Strength and Constitution.",
+    "base_bonus": {"strength": 3, "constitution": 2, "intelligence": -1}
+  },
+  "elf": {
+    "name": "Elf",
+    "description": "Agile and sharp. Masters of precision.",
+    "base_bonus": {"dexterity": 3, "intelligence": 2, "constitution": -1}
+  },
+  "dwarf": {
+    "name": "Dwarf",
+    "description": "Sturdy as the mountains. Unmatched resilience.",
+    "base_bonus": {"constitution": 3, "strength": 1, "dexterity": -1}
+  }
+}
