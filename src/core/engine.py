@@ -1,36 +1,36 @@
-# src/core/engine.py
 import sys
-from .state_machine import StateMachine
+from .state_machine import StateMachine, State
+
+class EmptyState(State):
+    def on_enter(self, machine): pass
+    def update(self, machine): pass
+    def handle_input(self, machine, user_input): pass
 
 class GameEngine:
     def __init__(self):
-        self.state_machine = StateMachine()
-        self.is_running = True
+        # Start with an empty state to avoid dependency issues (like missing player for CombatState)
+        initial_state = EmptyState()
+        self.state_machine = StateMachine(initial_state, game_data={"player": None})
+        self.running = True
 
     def run(self):
-        print("=== DND TEXT RPG ENGINE STARTED ===")
-        print("명령어 힌트: 'quit' to exit")
-        
-        while self.is_running:
-            # 1. 현재 상태 정보 출력 (UI 대용)
-            current_state = self.state_machine.get_current_state_name()
-            print(f"\n[Current State: {current_state}]")
-            
-            # 2. Update (로직 처리)
-            self.state_machine.update()
-            
-            # 3. Input Handling (입력 대기)
-            # 실제 TUI에서는 비동기 입력이지만, 지금은 input() 블로킹 사용
+        while self.running:
             try:
-                user_input = input(">> ").strip().lower()
+                self.state_machine.update()
+                
+                # Basic input handling loop
+                user_input = input(">> ")
+                if user_input.lower() == 'quit':
+                    self.running = False
+                    break
+                    
+                self.state_machine.handle_input(user_input)
+                
             except KeyboardInterrupt:
-                print("\nForce Quitting...")
-                break
-
-            if user_input == 'quit' and current_state == 'TitleState':
-                self.is_running = False
-                print("Engine Shutdown.")
-                break
-            
-            # 상태 머신으로 입력 전달
-            self.state_machine.handle_input(user_input)
+                self.running = False
+                sys.exit()
+            except Exception as e:
+                print(f"Error: {e}")
+                import traceback
+                traceback.print_exc()
+                self.running = False

@@ -6,59 +6,57 @@ from src.systems.growth_system import GrowthSystem
 
 class InventorySystem:
     """
-    아이템 획득, 장착, 해제 및 인벤토리 관리를 담당하는 시스템.
+    아이템 획득, 장착, 해제 등을 관리하는 시스템.
+    장비 변경 시 Actor의 Dirty Flag를 켜서 스탯 재계산을 유도합니다.
     """
 
     @staticmethod
     def add_item(actor: Actor, item: Item):
-        """인벤토리에 아이템 추가"""
+        """인벤토리에 아이템을 추가합니다."""
         actor.inventory.append(item)
-        print(f"[System] {actor.name}이(가) '{item.name}'을(를) 획득했습니다.")
+        # 획득만으로는 스탯이 변하지 않으므로 dirty 처리 안 함
 
     @staticmethod
     def equip_item(actor: Actor, item: Item) -> bool:
         """
-        아이템을 장착합니다.
-        1. 인벤토리에 있는지 확인
-        2. 해당 슬롯이 비어있지 않다면 기존 장비 해제
-        3. 장착 및 스탯 갱신
+        아이템을 장착하고 스탯을 갱신합니다.
         """
         if item not in actor.inventory:
-            print("[System] 소지하고 있지 않은 아이템입니다.")
             return False
-
+            
         slot = item.slot
-        if slot not in actor.equipment:
-            print(f"[System] 착용할 수 없는 슬롯입니다: {slot}")
+        if not slot:
             return False
-
-        # 이미 무언가 장착 중이라면 먼저 해제 (Swap)
-        current_equipped = actor.equipment[slot]
-        if current_equipped:
+            
+        # 기존 장착 해제
+        if actor.equipment.get(slot):
             InventorySystem.unequip_item(actor, slot)
-
-        # 장착 로직
+            
+        # 장착
         actor.equipment[slot] = item
-        actor.inventory.remove(item) # 인벤토리에서는 제거 (장비창으로 이동)
+        actor.inventory.remove(item)
         
-        # 장착 후 스탯 갱신 (최대 체력 등 변동 가능성)
+        # [최적화] 장비 변경 발생 -> Dirty Flag On
+        actor.mark_dirty()
+        
+        # HP/MP 최대치 갱신 (내부적으로 get_scaled_stat 호출 시 재계산됨)
         GrowthSystem.refresh_stats(actor)
-        
-        print(f"[System] {item.name}을(를) 장착했습니다.")
         return True
 
     @staticmethod
     def unequip_item(actor: Actor, slot: str) -> bool:
-        """특정 슬롯의 아이템을 해제하여 인벤토리로 되돌립니다."""
+        """
+        아이템을 해제하고 인벤토리로 되돌립니다.
+        """
         item = actor.equipment.get(slot)
         if not item:
-            print("[System] 해당 슬롯에는 장비가 없습니다.")
             return False
-
+            
         actor.equipment[slot] = None
-        actor.inventory.append(item) # 다시 인벤토리로
+        actor.inventory.append(item)
+        
+        # [최적화] 장비 해제 발생 -> Dirty Flag On
+        actor.mark_dirty()
         
         GrowthSystem.refresh_stats(actor)
-        
-        print(f"[System] {item.name} 장착을 해제했습니다.")
         return True

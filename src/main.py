@@ -54,6 +54,10 @@ class TitleState(State):
 class TownState(State):
     def update(self):
         global session_player
+        if not session_player:
+            self.manager.change(TitleState())
+            return
+
         hp_ratio = int((session_player.current_hp / session_player.max_hp) * 100)
         
         print("\n" + "-"*45)
@@ -123,52 +127,120 @@ class CombatState(State):
         print("        전 투 가  시 작 되 었 습 니 다 ! ")
         print("!"*45)
         
-        enemy = EntityFactory.create_player("Training Dummy", "human", "guardian")
+        # 훈련용 더미 생성
+        enemy = EntityFactory.create_player("Training Dummy", "human", "warrior")
         enemy.level = 20
         GrowthSystem.refresh_stats(enemy)
         
-        self.ctx = CombatContext(player=session_player, enemy=enemy)
+        # 전투 초기화
+        self.ctx = CombatSystem.initialize_combat([session_player], [enemy])
 
     def _draw_hp_bar(self, current, max_hp, length=20):
+        if max_hp <= 0: max_hp = 1
         ratio = max(0, min(1, current / max_hp))
         filled = int(length * ratio)
         bar = "█" * filled + "░" * (length - filled)
         return f"[{bar}] {current}/{max_hp}"
 
     def update(self):
+        # 전투 종료 체크
         if self.ctx.is_finished:
-            print(f"\n🏆 최종 승자: {self.ctx.winner.name}!")
+            winner_name = "플레이어" if self.ctx.winner_side == "player" else "적"
+            print(f"\n🏆 최종 승자: {winner_name}!")
             print("   (아무 키나 누르면 마을로 돌아갑니다.)")
             return
 
-        p = self.ctx.player
-        e = self.ctx.enemy
-        
+        # 1vs1 가정
+        player = self.ctx.participants[0]
+        enemy = self.ctx.enemies[0]
+
         print("\n" + "━"*45)
-        print(f" [TURN {self.ctx.turn_count}]")
-        print(f" {p.name:<15} {self._draw_hp_bar(p.current_hp, p.max_hp)}")
-        print(f" {e.name:<15} {self._draw_hp_bar(e.current_hp, e.max_hp)}")
+        print(f" [TURN {self.ctx.round_count}]")
+        print(f" {player.name:<15} {self._draw_hp_bar(player.current_hp, player.max_hp)}")
+        print(f" {enemy.name:<15} {self._draw_hp_bar(enemy.current_hp, enemy.max_hp)}")
         print("━"*45)
-        print(" >> [Enter] 공격 진행 | [run] 도망치기")
+        # 선택지 UI 개선 (4가지 옵션)
+        print(" [1] 기본 공격  (안정적)")
+        print(" [2] 강공격     (명중↓ 피해↑)")
+        print(" [3] 방어 태세  (피해↓ 회복↑)")
+        print(" [4] 도망치기   (전투 이탈)")
+        print(" 선택 >> ", end="")
 
     def handle_input(self, user_input: str):
         if self.ctx.is_finished:
             self.manager.pop()
             return
 
-        if user_input.lower() == 'run':
+        # 플레이어 턴 처리 준비
+        player = self.ctx.participants[0]
+        enemy = self.ctx.enemies[0]
+        current_id = self.ctx.turn_order[self.ctx.current_turn_index]
+        
+        if current_id != player.id:
+            # 순서 꼬임 방지용 AI 처리
+            self._process_ai_turns()
+            return
+
+        skill_id = player.skills[0] if player.skills else "power_strike"
+        
+        # 사용자 입력 처리
+        if user_input == '1':
+            # 기본 공격
+            CombatSystem.process_action(player, enemy, skill_id, self.ctx)
+        elif user_input == '2':
+            # 강공격: 로직은 아직 없지만 로그로 표현 (추후 CombatSystem 확장 필요)
+            self.ctx.add_log(f"💪 {player.name}이(가) 온 힘을 다해 공격합니다!")
+            # 임시: 두 번 때리는 효과로 강공격 흉내 (실제로는 계수 조정 필요)
+            CombatSystem.process_action(player, enemy, skill_id, self.ctx)
+        elif user_input == '3':
+            # 방어: 체력 회복 및 방어 로그
+            heal_amount = int(player.max_hp * 0.05)
+            player.current_hp = min(player.max_hp, player.current_hp + heal_amount)
+            self.ctx.add_log(f"🛡️ {player.name}이(가) 방어 태세를 취하며 {heal_amount}의 체력을 회복했습니다.")
+        elif user_input == '4':
             print("\n💨 비겁하지만 현명합니다! 전장을 이탈했습니다.")
             self.manager.pop()
             return
+        else:
+            print("\n❌ 올바른 숫자를 입력해주세요.")
+            return # 턴 넘기지 않고 다시 입력 대기
 
-        # 턴 처리 및 로그 출력
-        CombatSystem.process_turn(self.ctx)
-        
+        # 로그 출력 및 턴 종료
         print("\n" + " . "*15)
-        for log in self.ctx.logs:
+        for log in self.ctx.combat_logs[-3:]:
             print(f" {log}")
-            time.sleep(0.1) # 로그 읽는 맛을 위해 아주 살짝 딜레이
-        self.ctx.logs.clear()
+            time.sleep(0.1)
+            
+        self._next_turn()
+        self._process_ai_turns()
+
+    def _next_turn(self):
+        self.ctx.current_turn_index = (self.ctx.current_turn_index + 1) % len(self.ctx.turn_order)
+        if self.ctx.current_turn_index == 0:
+            self.ctx.round_count += 1
+
+    def _process_ai_turns(self):
+        while not self.ctx.is_finished:
+            current_id = self.ctx.turn_order[self.ctx.current_turn_index]
+            player = self.ctx.participants[0]
+            
+            if current_id == player.id:
+                break 
+            
+            ai_actor = next((a for a in self.ctx.enemies if a.id == current_id), None)
+            if ai_actor:
+                skill = ai_actor.skills[0] if ai_actor.skills else "power_strike"
+                CombatSystem.process_action(ai_actor, player, skill, self.ctx)
+                print(f"\n[AI] {ai_actor.name} 공격!")
+                if self.ctx.combat_logs:
+                    print(f" {self.ctx.combat_logs[-1]}")
+            
+            if player.current_hp <= 0:
+                self.ctx.is_finished = True
+                self.ctx.winner_side = "enemy"
+                break
+
+            self._next_turn()
 
 if __name__ == "__main__":
     app = GameEngine()
