@@ -1,13 +1,47 @@
-# [ Python Cache ]
+# ================================
+# Python Bytecode & Cache
+# ================================
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 
-# [ Static Files ]
-*.zip
-src.zip
+# ================================
+# Virtual Environment
+# ================================
+venv/
+env/
+.venv/
 
-# [ Data & Saves ]
+# ================================
+# Python Packaging / Distribution
+# ================================
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+*.zip
+*.tar.gz
+
+# ================================
+# IDE / Editor
+# ================================
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ================================
+# Data & Save Files
+# ================================
 src/saves/*.json
 *.json
-!src/data/*.json
+!src/data/*.json  # src/data 폴더 안은 예외
+
+# ================================
+# Logs & Temporary Files
+# ================================
+*.log
+*.tmp
+*.bak
