@@ -1,21 +1,13 @@
-[ Python Cache ]
-
-모든 하위 디렉토리의 __pycache__를 무조건 제외
-
-**/pycache/
-pycache/
+# [ Python Cache ]
+__pycache__/
 *.py[cod]
 *$py.class
 
-[ Static Files ]
-
+# [ Static Files ]
 *.zip
 src.zip
 
-[ Data & Saves ]
-
-데이터는 보존하되 자동 생성되는 저장 파일은 제외
-
-src/saves/
-.json
-!src/data/.json
+# [ Data & Saves ]
+src/saves/*.json
+*.json
+!src/data/*.json
