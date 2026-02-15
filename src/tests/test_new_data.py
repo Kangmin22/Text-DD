@@ -26,6 +26,7 @@ class Actor:
     
     # --- 능력치 (Base Stats) ---
     # 모든 기본 능력치는 10을 기준으로 시작합니다.
+    # [Critical Fix] 매력(Charisma)이 누락되지 않도록 딕셔너리에 명시합니다.
     base_stats: Dict[str, int] = field(default_factory=lambda: {
         "strength": 10,
         "dexterity": 10,
@@ -62,5 +63,7 @@ class Actor:
 
     def __post_init__(self):
         """객체 생성 직후 기본 설정을 수행합니다."""
-        # 생성 시 체력이 0이라면 최대 체력으로 초기화 (필요시)
-        pass
+        # 초기 생성 시 누락된 필드가 없도록 보장합니다.
+        for stat in ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"]:
+            if stat not in self.base_stats:
+                self.base_stats[stat] = 10

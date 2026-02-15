@@ -1,70 +1,85 @@
-# File: src/systems/math_engine.py
-import math
 import random
+from src.systems.growth_system import GrowthSystem
 
 class MathEngine:
     """
-    게임 내 모든 수치 계산을 담당하는 핵심 엔진.
-    공격, 방어, 확률 등의 공식을 중앙에서 관리함.
+    게임 내 모든 수치 연산을 담당하는 핵심 엔진입니다.
+    Version: v2.2 (Final Balanced - 시뮬레이션 검증 완료)
+
+    [핵심 연산 로직]
+    1. 데미지 산출: 스킬 계수(Scaling)를 AP/SP에 곱하여 합산.
+    2. 명중/회피: 민첩(DEX) 기반 회피율 판정 (마법은 필중).
+    3. 치명타: 민첩 기반 확률 판정 및 1.5배 가중치 부여.
+    4. 방어력: 체질(CON) 기반의 퍼센트 데미지 감소(DR) 적용.
     """
 
     @staticmethod
-    def calculate_damage_variance(base_damage: int, variance_percent: float = 0.1) -> int:
+    def calculate_skill_damage(attacker, defender, skill_data: dict) -> tuple[int, bool]:
         """
-        기본 데미지에 ±variance_percent 만큼의 랜덤 변동을 줍니다.
-        예: 100 데미지, 10% 변동 -> 90 ~ 110 사이의 값 반환
+        공격자의 능력치와 기술 데이터를 기반으로 최종 피해량과 치명타 여부를 결정합니다.
+        공식: ((AP * ap_계수) + (SP * sp_계수)) * (분산) * (치명타) * (1 - 방어율)
         """
-        min_dmg = int(base_damage * (1 - variance_percent))
-        max_dmg = int(base_damage * (1 + variance_percent))
-        return random.randint(min_dmg, max_dmg)
-
-    @staticmethod
-    def calculate_defense_dr(armor: int, attacker_level: int) -> float:
-        """
-        WoW 스타일 방어력 점감 공식 (Diminishing Returns)
-        DR = Armor / (Armor + K)
-        K = 레벨 상수 (여기서는 간단히 level * 50 + 100 사용)
-        """
-        k_constant = (attacker_level * 50) + 100
-        dr = armor / (armor + k_constant)
-        return min(0.75, dr) # 최대 75% 감소로 제한 (캡)
-
-    @staticmethod
-    def roll_critical(attacker_dex: int, base_chance: float = 0.05) -> bool:
-        """
-        치명타 발생 여부를 판정합니다.
-        기본 확률 5% + (DEX * 0.002) (DEX 100당 20% 추가)
-        """
-        chance = base_chance + (attacker_dex * 0.002)
-        return random.random() < chance
-
-    @staticmethod
-    def roll_dodge(defender_dex: int, attacker_accuracy: int = 100) -> bool:
-        """
-        회피 여부를 판정합니다.
-        회피율 = (DEX * 0.001) (DEX 100당 10%)
-        단, 공격자의 명중률이 높으면 상쇄될 수 있음 (추후 구현)
-        """
-        dodge_chance = defender_dex * 0.001
-        return random.random() < min(0.5, dodge_chance) # 최대 50% 회피율 제한
-
-    @staticmethod
-    def calculate_final_damage(raw_damage: int, armor: int, attacker_level: int, is_crit: bool) -> int:
-        """
-        모든 요소를 종합하여 최종 데미지를 계산합니다.
-        1. 방어력 감소 적용
-        2. 치명타 배율 적용 (1.5배)
-        3. 랜덤 분산 적용
-        """
-        # 1. 방어력 적용
-        dr = MathEngine.calculate_defense_dr(armor, attacker_level)
-        damage_after_armor = raw_damage * (1 - dr)
-
-        # 2. 치명타 적용
-        if is_crit:
-            damage_after_armor *= 1.5
-
-        # 3. 랜덤 분산 적용 (최종적으로 정수 변환)
-        final_damage = MathEngine.calculate_damage_variance(int(damage_after_armor))
+        # 1. 공격자의 실시간 공격력(AP/SP) 확보
+        ap = GrowthSystem.get_attack_power(attacker)
+        sp = GrowthSystem.get_magic_power(attacker)
         
-        return max(1, final_damage) # 최소 1 데미지 보장
+        # 2. 기술의 계수(Scaling) 정보 추출 (기본값은 평타 계수 1.0)
+        scaling = skill_data.get("scaling", {"ap": 1.0, "sp": 0.0})
+        ap_coef = scaling.get("ap", 0.0)
+        sp_coef = scaling.get("sp", 0.0)
+        
+        # 기본 데미지 합계 계산
+        base_damage = (ap * ap_coef) + (sp * sp_coef)
+        
+        # 3. 데미지 분산 적용 (±10% 범위의 난수)
+        # 매번 일정한 데미지가 아닌 '주사위 굴림'의 느낌을 줍니다.
+        variance = random.uniform(0.9, 1.1)
+        varied_damage = base_damage * variance
+        
+        # 4. 치명타(Critical) 판정
+        # 민첩(DEX) 10 기준 5% 확률, DEX 1포인트당 0.5%씩 추가 확률 부여
+        attacker_dex = GrowthSystem.get_scaled_stat(attacker, "dexterity")
+        crit_chance = 0.05 + max(0, (attacker_dex - 10) * 0.005)
+        
+        is_crit = False
+        if random.random() < crit_chance:
+            is_crit = True
+            varied_damage *= 1.5 # 치명타 발생 시 데미지 50% 증폭
+            
+        # 5. 방어력(Damage Reduction) 적용
+        # 스킬 타입에 따라 방어구 관통 여부 결정
+        skill_type = skill_data.get("type", "physical")
+        defense_rate = GrowthSystem.get_defense(defender)
+        
+        # 물리(physical)와 하이브리드(hybrid)는 적의 방어력에 영향을 받음
+        if skill_type in ["physical", "hybrid"]:
+            final_damage = varied_damage * (1.0 - defense_rate)
+        else:
+            # 순수 마법(magic)은 적의 물리 방어력을 무시 (트루 데미지)
+            # 마법 저항력 시스템 도입 전까지는 마법이 방어 무시로 작동하여 강력함을 유지
+            final_damage = varied_damage
+            
+        return max(1, int(final_damage)), is_crit
+
+    @staticmethod
+    def roll_hit(attacker, defender, skill_data: dict) -> bool:
+        """
+        공격의 명중 여부를 판정합니다.
+        - 마법(magic): 주문력의 특성상 피하기 어려우므로 필중(True).
+        - 그 외: 방어자의 민첩(DEX)에 따른 회피율(Evasion)을 주사위와 비교.
+        """
+        skill_type = skill_data.get("type", "physical")
+        
+        # 마법 스킬은 빗나가지 않음 (전략적 가치 제고)
+        if skill_type == "magic":
+            return True
+            
+        # 방어자의 실시간 회피율 가져오기
+        evasion_chance = GrowthSystem.get_evasion(defender)
+        
+        # 0.0 ~ 1.0 사이의 주사위를 굴림
+        hit_roll = random.random()
+        
+        # 주사위 눈금이 회피율보다 높으면 명중 성공
+        # 예: 회피율 15%(0.15)일 때, 주사위가 0.15 미만이면 '피함' 판정
+        return hit_roll >= evasion_chance

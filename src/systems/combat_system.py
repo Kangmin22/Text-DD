@@ -1,107 +1,104 @@
-# File: src/systems/combat_system.py
-import random
-from typing import List, Dict, Any
 from src.models.actor import Actor
 from src.models.combat_context import CombatContext
+from src.utils.data_loader import DataLoader
 from src.systems.math_engine import MathEngine
-from src.systems.skill_system import SkillSystem
-from src.systems.growth_system import GrowthSystem
+import random
 
 class CombatSystem:
     """
-    전투의 규칙(Rule)을 집행하는 시스템.
-    주도권 계산, 스킬 실행, 방어 판정, 상태 이상 처리 등을 담당함.
+    전투의 흐름(턴, 액션, 결과)을 제어하는 핵심 시스템.
+    Version: v2.2 (시뮬레이션 기반 최종 밸런스 적용)
+    
+    [주요 기능]
+    - 주도권(DEX 기반) 계산 및 턴 순서 결정.
+    - 스킬 데이터 기반 MP 소모 및 데미지 계산 처리.
+    - 매 액션 종료 후 MP 소량 회복 (전투 유지력 확보).
     """
 
     @staticmethod
-    def initialize_combat(players: List[Actor], enemies: List[Actor]) -> CombatContext:
+    def initialize_combat(players: list, enemies: list) -> CombatContext:
         """
-        전투를 초기화하고 주도권을 계산하여 CombatContext를 생성합니다.
+        전투 컨텍스트를 생성하고 주도권(Initiative)을 결정합니다.
+        공식: (DEX * 1.5) + 1d20
         """
-        ctx = CombatContext(participants=players, enemies=enemies)
+        ctx = CombatContext(players, enemies)
         
-        # 1. 주도권 결정 (DEX 기반 + 약간의 랜덤)
-        all_actors = players + enemies
-        # Score = (DEX * 1.5) + (1d20)
-        scored_actors = []
-        for a in all_actors:
-            dex = GrowthSystem.get_scaled_stat(a, "dexterity")
+        # 주도권 계산을 위해 모든 참여자 취합
+        all_participants = players + enemies
+        initiatives = []
+        
+        # 순환 참조 방지를 위한 지역 임포트
+        from src.systems.growth_system import GrowthSystem 
+        
+        for actor in all_participants:
+            dex = GrowthSystem.get_scaled_stat(actor, "dexterity")
+            # 주사위 눈금(1~20)을 더해 난수성 부여
             score = (dex * 1.5) + random.randint(1, 20)
-            scored_actors.append((score, a.id))
-        
-        # 점수 높은 순으로 정렬
-        scored_actors.sort(key=lambda x: x[0], reverse=True)
-        ctx.turn_order = [x[1] for x in scored_actors]
+            initiatives.append((score, actor.id))
+            
+        # 점수가 높은 순서대로 정렬하여 턴 순서 확정
+        initiatives.sort(key=lambda x: x[0], reverse=True)
+        ctx.turn_order = [x[1] for x in initiatives]
         
         return ctx
 
     @staticmethod
-    def calculate_hit_chance(attacker: Actor, defender: Actor) -> float:
-        """
-        기본 명중률 계산 (추후 스킬별 보정치 추가 가능)
-        """
-        attacker_dex = GrowthSystem.get_scaled_stat(attacker, "dexterity")
-        defender_dex = GrowthSystem.get_scaled_stat(defender, "dexterity")
-        
-        # 기본 90% 명중률 + (공격자 DEX - 방어자 DEX) * 0.5%
-        hit_chance = 90 + (attacker_dex - defender_dex) * 0.5
-        return max(50, min(100, hit_chance)) # 최소 50%, 최대 100%
-
-    @staticmethod
     def process_action(attacker: Actor, defender: Actor, skill_id: str, ctx: CombatContext):
         """
-        스킬 실행, 명중/회피 판정, 데미지 계산 및 적용을 수행하는 핵심 전투 로직.
+        공격자가 방어자에게 특정 기술을 시전하는 과정을 처리합니다.
+        과정: 기술 로드 -> MP 검사 -> 명중 판정 -> 피해 계산 -> 적용 -> 마나 회복
         """
-        # 1. 스킬 데이터 로드 및 1차 데미지 계산 (공격자 스탯 기반)
-        res = SkillSystem.calculate_skill_damage(attacker, skill_id)
-        
-        if "error" in res:
-            ctx.add_log(f"⚠️ {attacker.name}: {res['error']}")
+        # 1. 기술 데이터 로드
+        skill = DataLoader.load_skill(skill_id)
+        if not skill:
+            ctx.add_log(f"⚠️ {attacker.name}: 알 수 없는 기술({skill_id})입니다.")
             return
 
-        raw_damage = res["damage"]
-        skill_name = res["skill_name"]
-        cost = res["cost"]
-
-        # 2. 자원 소모 (명중 여부와 상관없이 소모됨)
-        attacker.current_mp -= cost.get("mp", 0)
-        attacker.current_hp -= cost.get("hp", 0)
-
-        # 3. 회피(Dodge) 판정
-        defender_dex = GrowthSystem.get_scaled_stat(defender, "dexterity")
-        # 스킬 타입이 물리(physical)일 때만 회피 가능하도록 설정 가능 (현재는 전체 적용)
-        if MathEngine.roll_dodge(defender_dex):
-            ctx.add_log(f"💨 {attacker.name}의 [{skill_name}]! 그러나 {defender.name}이(가) 날렵하게 피했습니다!")
+        skill_name = skill.get("name", "Unknown Skill")
+        
+        # 2. 마나(MP) 소모 체크
+        costs = skill.get("cost", {})
+        mp_cost = costs.get("mp", 0)
+        
+        if attacker.current_mp < mp_cost:
+            ctx.add_log(f"💧 {attacker.name}: 마력이 부족합니다! ({skill_name} 필요 MP: {mp_cost})")
             return
 
-        # 4. 치명타(Critical) 판정
-        attacker_dex = GrowthSystem.get_scaled_stat(attacker, "dexterity")
-        is_crit = MathEngine.roll_critical(attacker_dex)
+        # 자원 차감
+        attacker.current_mp -= mp_cost
 
-        # 5. 방어력 및 최종 데미지 계산 (MathEngine 위임)
-        defender_armor = GrowthSystem.get_scaled_stat(defender, "constitution") * 5
-        # TODO: 장비 방어력 합산 로직 추가 필요 (InventorySystem 연동)
-        
-        final_damage = MathEngine.calculate_final_damage(
-            raw_damage=raw_damage,
-            armor=defender_armor,
-            attacker_level=attacker.level,
-            is_crit=is_crit
-        )
+        # 3. 명중 판정 (MathEngine 위임)
+        if not MathEngine.roll_hit(attacker, defender, skill):
+            ctx.add_log(f"💨 {attacker.name}의 [{skill_name}]! ...하지만 {defender.name}이(가) 피했습니다.")
+        else:
+            # 4. 데미지 계산 및 적용
+            # MathEngine.calculate_skill_damage는 (damage, is_crit) 튜플을 반환함
+            result = MathEngine.calculate_skill_damage(attacker, defender, skill)
+            
+            # 호환성 처리 (튜플이 아닐 경우 대비)
+            if isinstance(result, tuple):
+                damage, is_crit = result
+            else:
+                damage = result
+                is_crit = False
+            
+            # 실제 체력 차감
+            defender.current_hp = max(0, defender.current_hp - damage)
+            
+            # 5. 결과 로그 기록
+            skill_type = skill.get("type", "physical")
+            # 타입에 따른 아이콘 설정
+            if skill_type == "physical": icon = "⚔️"
+            elif skill_type == "magic": icon = "✨"
+            else: icon = "🔮" # Hybrid or Other
+            
+            crit_text = " (치명타!)" if is_crit else ""
+            ctx.add_log(f"{icon} {attacker.name}의 [{skill_name}]!{crit_text} {defender.name}에게 {damage} 피해.")
 
-        # 6. 피해 적용
-        defender.current_hp = max(0, defender.current_hp - final_damage)
+        # 6. [전략적 포인트] 턴 종료 시 마나 자연 회복
+        # 시뮬레이션에서 검증된 '매 턴 2 회복'을 적용하여 스킬 빈도를 높임
+        attacker.current_mp = min(attacker.max_mp, attacker.current_mp + 2)
 
-        # 7. 로그 기록 (상세 정보 포함)
-        attack_emoji = "⚔️" if res["type"] == "physical" else "🔮"
-        crit_msg = " (치명타!)" if is_crit else ""
-        
-        # 방어력 감소율 역산 (로그 표시용)
-        dr = MathEngine.calculate_defense_dr(defender_armor, attacker.level)
-        dr_percent = int(dr * 100)
-        
-        ctx.add_log(f"{attack_emoji} {attacker.name}의 [{skill_name}]!{crit_msg}")
-        ctx.add_log(f"   {defender.name}에게 {final_damage}의 피해! (방어력으로 {dr_percent}% 감소)")
-
+        # 7. 사망 판정
         if defender.current_hp <= 0:
-            ctx.add_log(f"💀 {defender.name}가 쓰러졌습니다!")
+            ctx.add_log(f"💀 {defender.name}이(가) 쓰러졌습니다!")
